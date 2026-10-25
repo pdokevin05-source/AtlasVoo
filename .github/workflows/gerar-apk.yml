@@ -1,15 +1,19 @@
-name: Gerar APK Android
+name: Validar APK e gerar AAB assinado
 
 on:
   workflow_dispatch:
   push:
+    branches: [ main, master, 'preparacao/atlas-1.3' ]
+  pull_request:
     branches: [ main, master ]
 
 jobs:
-  apk:
+  validar:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      ATLAS_FARES_API_BASE: ${{ vars.ATLAS_FARES_API_BASE }}
     steps:
       - uses: actions/checkout@v4
       - name: Instalar Java 17
@@ -17,19 +21,58 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Instalar Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Validar JavaScript e testes do backend
+        working-directory: webapp
+        run: |
+          npm run check
+          npm test
       - name: Instalar Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.9'
       - name: Instalar Android SDK
         uses: android-actions/setup-android@v4
-      - name: Instalar Android 36 e ferramentas
+      - name: Instalar Android 36
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
-      - name: Compilar APK instalável (debug)
+      - name: Compilar APK de teste
         run: gradle --no-daemon --stacktrace assembleDebug
-      - name: Disponibilizar o arquivo APK
+      - name: Publicar APK de teste
         uses: actions/upload-artifact@v4
         with:
-          name: AtlasVoos-Android-APK
+          name: AtlasVoos-1.3-APK-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Preparar chave de upload (somente fora de PR)
+        if: ${{ github.event_name != 'pull_request' }}
+        shell: bash
+        env:
+          ATLAS_UPLOAD_KEYSTORE_BASE64: ${{ secrets.ATLAS_UPLOAD_KEYSTORE_BASE64 }}
+          ATLAS_STORE_PASSWORD: ${{ secrets.ATLAS_STORE_PASSWORD }}
+          ATLAS_KEY_ALIAS: ${{ secrets.ATLAS_KEY_ALIAS }}
+          ATLAS_KEY_PASSWORD: ${{ secrets.ATLAS_KEY_PASSWORD }}
+        run: |
+          if [[ -z "$ATLAS_UPLOAD_KEYSTORE_BASE64" || -z "$ATLAS_STORE_PASSWORD" || -z "$ATLAS_KEY_ALIAS" || -z "$ATLAS_KEY_PASSWORD" ]]; then
+            echo "Assinatura nao configurada. APK debug validado; AAB de producao sera ignorado."
+            exit 0
+          fi
+          printf '%s' "$ATLAS_UPLOAD_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/atlas-upload.jks"
+          echo "ATLAS_KEYSTORE_PATH=$RUNNER_TEMP/atlas-upload.jks" >> "$GITHUB_ENV"
+          echo "ATLAS_SIGNING_READY=true" >> "$GITHUB_ENV"
+      - name: Compilar AAB de producao ASSINADO
+        if: ${{ env.ATLAS_SIGNING_READY == 'true' }}
+        env:
+          ATLAS_STORE_PASSWORD: ${{ secrets.ATLAS_STORE_PASSWORD }}
+          ATLAS_KEY_ALIAS: ${{ secrets.ATLAS_KEY_ALIAS }}
+          ATLAS_KEY_PASSWORD: ${{ secrets.ATLAS_KEY_PASSWORD }}
+        run: gradle --no-daemon --stacktrace bundleRelease
+      - name: Publicar AAB assinado para Play Console
+        if: ${{ env.ATLAS_SIGNING_READY == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: AtlasVoos-1.3-AAB-Play
+          path: app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
