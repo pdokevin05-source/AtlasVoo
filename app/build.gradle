@@ -1,5 +1,12 @@
 plugins { id 'com.android.application' }
 
+def faresBackend = (System.getenv('ATLAS_FARES_API_BASE') ?: '').trim().replaceAll('/+$', '')
+if (faresBackend && (!faresBackend.startsWith('https://') || faresBackend.contains('"') || faresBackend.contains('\\') || faresBackend.contains(' '))) {
+    throw new GradleException('ATLAS_FARES_API_BASE deve ser um endereço HTTPS válido, sem caminho final.')
+}
+def keystorePath = System.getenv('ATLAS_KEYSTORE_PATH')
+def signedRelease = keystorePath && System.getenv('ATLAS_STORE_PASSWORD') && System.getenv('ATLAS_KEY_ALIAS') && System.getenv('ATLAS_KEY_PASSWORD')
+
 android {
     namespace 'br.com.atlasvoos'
     compileSdk 36
@@ -8,10 +15,29 @@ android {
         applicationId 'br.com.atlasvoos'
         minSdk 23
         targetSdk 36
-        versionCode 4
-        versionName '1.2.0'
+        versionCode 5
+        versionName '1.3.0'
+        buildConfigField 'String', 'FARES_API_BASE_URL', '"' + faresBackend + '"'
     }
 
+    buildFeatures { buildConfig true }
+
+    signingConfigs {
+        release {
+            if (signedRelease) {
+                storeFile file(keystorePath)
+                storePassword System.getenv('ATLAS_STORE_PASSWORD')
+                keyAlias System.getenv('ATLAS_KEY_ALIAS')
+                keyPassword System.getenv('ATLAS_KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            if (signedRelease) signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17

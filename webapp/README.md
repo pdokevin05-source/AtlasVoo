@@ -1,4 +1,4 @@
-# ATLAS VOOS 1.1 · explorador de viagens conectado 🌍✈️
+# ATLAS VOOS 1.3 · explorador de viagens conectado 🌍✈️
 
 Projeto HTML5/CSS3/JavaScript + um servidor Node.js sem dependências externas (Node 20 ou superior). Idioma: português do Brasil. Funciona em PCs e celulares através de navegador atualizado. Não contém tráfego artificial, preços fabricados ou indicação de destinos inventados.
 
@@ -62,6 +62,9 @@ O GPS é opt-in e atualizado pela API do navegador. As coordenadas do **centro d
 **Não há modo offline de consulta**. O arquivo de interface e o catálogo de aeroportos de resgate podem continuar no dispositivo, mas rastreamento, mapa, clima, geocodificação e tarifas dependem de conexão.
 
 ## Testes
+
+Execute `npm test` para a suíte local (saúde da API, validação de dados, CORS e política de privacidade). Para Android 1.3, veja `../PREPARAR-PLAY-STORE.md`. As tarifas internas no APK dependem de backend HTTPS e credencial do provedor no servidor, nunca dentro do APK.
+
 
 - `node --check app.js`
 - `node --check server.js`

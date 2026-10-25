@@ -16,6 +16,15 @@ const HOST=process.env.HOST||'127.0.0.1';
 const PORT=Number(process.env.PORT)||3000;
 const TOKEN=process.env.DUFFEL_ACCESS_TOKEN||'';
 const FARES_MODE=TOKEN.startsWith('duffel_live_')?'live':TOKEN?'test':'unconfigured';
+const fareLimits=new Map();
+function checkFareRate(req){
+ const now=Date.now(),ip=String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'unknown').split(',')[0].slice(0,80);
+ const key=ip||'unknown',record=fareLimits.get(key);
+ if(fareLimits.size>4000){for(const [k,v] of fareLimits)if(now-v.start>3600000)fareLimits.delete(k);if(fareLimits.size>4000)fareLimits.clear()}
+ if(!record||now-record.start>3600000){fareLimits.set(key,{start:now,count:1});return true}
+ if(record.count>=12)return false;
+ record.count++;return true;
+}
 const seed=JSON.parse(fs.readFileSync(path.join(ROOT,'airports-seed.json'),'utf8'));
 const cache=new Map();let airports=seed, airportsFromSource=false, airportsUpdated=0, refreshingAirports=null;
 function send(res,status,value,extra={}){const body=JSON.stringify(value);res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',...extra});res.end(body)}
@@ -45,17 +54,22 @@ async function searchFares(p){const {origin,destination,departure,returnDate,adu
  const r=await fetchJson('https://api.duffel.com/air/offer_requests?return_offers=true&supplier_timeout=18000',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json','Duffel-Version':'v2','Authorization':`Bearer ${TOKEN}`},body:JSON.stringify(data)},49000);
  const offers=r?.data?.offers||[];return {test:FARES_MODE!=='live',provider:'Duffel',searchAt:new Date().toISOString(),offers:offers.slice(0,150).map(o=>({id:o.id,total_amount:o.total_amount,total_currency:o.total_currency,expires_at:o.expires_at,available_seats:o.available_seats,airline:o.owner?.name||'',slices:(o.slices||[]).map(s=>({depart:s.segments?.[0]?.departing_at||null,arrive:s.segments?.at(-1)?.arriving_at||null,minutes:durationMinutes(s.duration),stops:Math.max(0,(s.segments?.length||1)-1),segments:(s.segments||[]).map(x=>({operating_carrier:x.operating_carrier?.name||x.marketing_carrier?.name||'',code:`${x.marketing_carrier?.iata_code||''}${x.marketing_carrier_flight_number||''}`}))}))}))};
 }
-function sendFile(res,p){const file=path.join(ROOT,p);const fileAllowed=['index.html','app.js','style.css','airports-seed.json','favicon.ico','mobile.css','mobile.js','manifest.webmanifest','sw.js','icons/icon-192.png','icons/icon-512.png'];if(!fileAllowed.includes(p)){replyError(res,404,'Não encontrado');return}fs.readFile(file,(err,bytes)=>{if(err){replyError(res,404,'Não encontrado');return}const types={html:'text/html; charset=utf-8',js:'application/javascript; charset=utf-8',css:'text/css; charset=utf-8',json:'application/json; charset=utf-8',ico:'image/x-icon',webmanifest:'application/manifest+json',png:'image/png'};res.writeHead(200,{'Content-Type':types[path.extname(p).slice(1)]||'application/octet-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','Permissions-Policy':'geolocation=(self)'});res.end(bytes)})}
+function sendFile(res,p){const file=path.join(ROOT,p);const fileAllowed=['index.html','privacidade.html','app.js','style.css','airports-seed.json','favicon.ico','mobile.css','mobile.js','manifest.webmanifest','sw.js','icons/icon-192.png','icons/icon-512.png'];if(!fileAllowed.includes(p)){replyError(res,404,'Não encontrado');return}fs.readFile(file,(err,bytes)=>{if(err){replyError(res,404,'Não encontrado');return}const types={html:'text/html; charset=utf-8',js:'application/javascript; charset=utf-8',css:'text/css; charset=utf-8',json:'application/json; charset=utf-8',ico:'image/x-icon',webmanifest:'application/manifest+json',png:'image/png'};res.writeHead(200,{'Content-Type':types[path.extname(p).slice(1)]||'application/octet-stream','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','Permissions-Policy':'geolocation=(self)'});res.end(bytes)})}
 async function parseBody(req){let data='',bytes=0;for await(const chunk of req){bytes+=chunk.length;if(bytes>16000)throw Object.assign(Error('Requisição muito grande'),{status:413});data+=chunk}try{return JSON.parse(data)}catch{throw Object.assign(Error('JSON inválido'),{status:400})}}
 const server=http.createServer(async(req,res)=>{
  try{const u=new URL(req.url,`http://${req.headers.host||'localhost'}`);const p=u.pathname;
+  if(req.headers.origin==='https://atlasvoos.local' && (p==='/api/health'||p==='/api/fares')){
+   res.setHeader('Access-Control-Allow-Origin','https://atlasvoos.local');res.setHeader('Vary','Origin');
+   res.setHeader('Access-Control-Allow-Methods','GET, POST, OPTIONS');res.setHeader('Access-Control-Allow-Headers','Content-Type');
+   if(req.method==='OPTIONS'){res.writeHead(204);return res.end()}
+  }
  if(req.method==='GET'&&p==='/api/health')return send(res,200,{ok:true,online:true,sources:['OpenStreetMap','OurAirports','Open-Meteo','adsb.lol','airplanes.live','ADSBDB'],faresConfigured:!!TOKEN,faresMode:FARES_MODE,airportsCount:airports.length,airportsLive:airportsFromSource});
  if(req.method==='GET'&&p==='/api/airports'){if(!airportsFromSource&&airports===seed)await Promise.race([refreshAirportCatalog(),new Promise(ok=>setTimeout(ok,10000))]);return send(res,200,{airports,fallback:!airportsFromSource,updatedAt:airportsUpdated||null})}
  if(req.method==='GET'&&p==='/api/aircraft'){const lat=Number(u.searchParams.get('lat')),lon=Number(u.searchParams.get('lon')),radius=Number(u.searchParams.get('radius')||250);if(!Number.isFinite(lat)||lat< -90||lat>90||!Number.isFinite(lon)||lon< -180||lon>180||radius<1||radius>250)return replyError(res,400,'Coordenadas ou raio inválidos');return send(res,200,await getAircraft(lat,lon,radius))}
  if(req.method==='GET'&&p==='/api/route'){const callsign=(u.searchParams.get('callsign')||'').trim().toUpperCase();if(!/^[A-Z0-9]{2,12}$/.test(callsign))return replyError(res,400,'Indicativo de voo inválido');return send(res,200,await getRoute(callsign))}
- if(req.method==='POST'&&p==='/api/fares'){const payload=await parseBody(req);return send(res,200,await searchFares(payload))}
- if(req.method==='GET'&&(p==='/'||p==='/index.html'||p==='/style.css'||p==='/app.js'||p==='/airports-seed.json'||p==='/mobile.css'||p==='/mobile.js'||p==='/sw.js'||p==='/manifest.webmanifest'||p==='/icons/icon-192.png'||p==='/icons/icon-512.png'))return sendFile(res,p==='/'?'index.html':p.slice(1));
+ if(req.method==='POST'&&p==='/api/fares'){if(!checkFareRate(req))return replyError(res,429,'Limite de consultas atingido; tente novamente mais tarde.');const payload=await parseBody(req);return send(res,200,await searchFares(payload))}
+ if(req.method==='GET'&&(p==='/'||p==='/index.html'||p==='/privacidade.html'||p==='/style.css'||p==='/app.js'||p==='/airports-seed.json'||p==='/mobile.css'||p==='/mobile.js'||p==='/sw.js'||p==='/manifest.webmanifest'||p==='/icons/icon-192.png'||p==='/icons/icon-512.png'))return sendFile(res,p==='/'?'index.html':p.slice(1));
  return replyError(res,404,'Endpoint não encontrado');
  }catch(err){console.error('[API]',err.message);replyError(res,err.status||(/Upstream|abort|fetch failed|unavailable|indisponíveis/i.test(err.message)?503:502),err.status?err.message:'Não foi possível consultar a fonte externa neste momento')}
 });
-server.listen(PORT,HOST,()=>{console.log(`Atlas Voos no ar: http://${HOST}:${PORT}`);console.log('Preços:',FARES_MODE==='unconfigured'?'não configurados':FARES_MODE==='live'?'produção':'teste');refreshAirportCatalog()});
+server.listen(PORT,HOST,()=>{console.log(`Atlas Voos no ar: http://${HOST}:${PORT}`);console.log('Preços:',FARES_MODE==='unconfigured'?'não configurados':FARES_MODE==='live'?'produção':'teste');if(process.env.ATLAS_SKIP_AIRPORTS_UPDATE!=='1')refreshAirportCatalog()});

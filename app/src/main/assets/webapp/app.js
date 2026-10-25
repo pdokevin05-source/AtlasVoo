@@ -30,7 +30,7 @@ let litePreference=null;try{litePreference=localStorage.getItem(LITE_KEY)}catch{
 const liteInitial=litePreference==='on'?true:litePreference==='off'?false:defaultLite;
 
 let favs=[];try{favs=JSON.parse(localStorage.getItem(KEY)||'[]');if(!Array.isArray(favs))favs=[]}catch{}
-const state={lite:liteInitial, airportMap:new Map(), airportIcon:null, planeById:new Map(), online:navigator.onLine, destination:null, origin:HOME, gps:null, gpsWatch:null, airports:BASE_AIRPORTS, planes:[], planesSource:'', selectedPlane:null, map:null, markers:null, countryLayer:null, selectedMarker:null, gpsMarker:null, activeRoute:null, planeMap:new Map(), weather:null, searchResults:[], searchMode:'all', apiFares:false, fareTest:false, layers:{aircraft:true,airports:true,borders:true,route:true}, geoSeq:0, weatherSeq:0, airportSeq:0, airportsAttempt:0, radarSeq:0, lastRadarAt:0, radarBusy:false, countryGeojson:null};
+const state={lite:liteInitial, airportMap:new Map(), airportIcon:null, planeById:new Map(), online:navigator.onLine, destination:null, origin:HOME, gps:null, gpsWatch:null, airports:BASE_AIRPORTS, planes:[], planesSource:'', selectedPlane:null, map:null, markers:null, countryLayer:null, selectedMarker:null, gpsMarker:null, activeRoute:null, planeMap:new Map(), weather:null, searchResults:[], searchMode:'all', apiFares:false, fareTest:false, faresApiBase:'', radarQueued:false, radarFailures:0, layers:{aircraft:true,airports:true,borders:true,route:true}, geoSeq:0, weatherSeq:0, airportSeq:0, airportsAttempt:0, radarSeq:0, lastRadarAt:0, radarBusy:false, countryGeojson:null};
 let toastTimer;
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3800)}
 const haversine=(a,b)=>{const R=6371,rad=Math.PI/180,dlat=(b.lat-a.lat)*rad,dlon=(b.lon-a.lon)*rad,x=Math.sin(dlat/2)**2+Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(dlon/2)**2;return 2*R*Math.asin(Math.sqrt(x))};
@@ -38,7 +38,7 @@ function positionTimeZone(tz,lat,lon){if(!tz)return '—';try{return new Intl.Da
 function displayName(loc){return [loc.name,loc.admin1,loc.country].filter(Boolean).filter((s,i,a)=>a.indexOf(s)===i).join(' · ')}
 const durText=mins=>!Number.isFinite(mins)?'—':`${Math.floor(mins/60)}h ${String(Math.round(mins%60)).padStart(2,'0')}min`;
 const distanceText=d=>Number.isFinite(d)?`${fmt(d)} km`:'—';
-async function json(url,options={},ms=17000){if(location.hostname==='atlasvoos.local'&&url==='/api/fares')throw Error('Consultas de preços dentro do app exigem um provedor de passagens configurado; use o parceiro de busca abaixo');const controller=new AbortController();const id=setTimeout(()=>controller.abort(),ms);try{const res=await fetch(url,{...options,signal:controller.signal,cache:'no-store'});let obj;try{obj=await res.json()}catch{throw Error(`Resposta inválida (${res.status})`)}if(!res.ok)throw Error(obj.error||obj.message||`HTTP ${res.status}`);return obj}finally{clearTimeout(id)}}
+async function json(url,options={},ms=17000){if(location.hostname==='atlasvoos.local'&&url==='/api/fares'){if(!state.faresApiBase)throw Error('Servidor seguro de tarifas ainda não configurado. Use a busca externa.');url=state.faresApiBase+'/api/fares';}const controller=new AbortController();const id=setTimeout(()=>controller.abort(),ms);try{const res=await fetch(url,{...options,signal:controller.signal,cache:'no-store'});let obj;try{obj=await res.json()}catch{throw Error(`Resposta inválida (${res.status})`)}if(!res.ok)throw Error(obj.error||obj.message||`HTTP ${res.status}`);return obj}finally{clearTimeout(id)}}
 function updateOnline(){state.online=navigator.onLine;$('connectionStatus').textContent=state.online?'Conexão disponível':'Sem Internet: dados ao vivo pausados';$('liveLabel').textContent=state.online?'ONLINE':'OFFLINE';document.querySelectorAll('.pulse-dot,.live-chip i').forEach(e=>e.style.background=state.online?'#45d5a6':'#ef9b6b');if(!state.online){state.planes=[];clearPlaneMarkers();renderPlaneList();$('mapAircraftCount').textContent='Radar indisponível'}else{refreshRadar(true);loadAirports()}}
 window.addEventListener('online',updateOnline);window.addEventListener('offline',updateOnline);
 function setLiteMode(enabled,initial=false){
@@ -138,7 +138,7 @@ function renderPlaneMarkers(){
  const bounds=state.map.getBounds().pad(state.lite?.05:.15);
  let visible=state.planes.filter(p=>bounds.contains([p.lat,p.lon]));
  const cap=state.lite?75:240;
- if(visible.length>cap){const c=state.map.getCenter();visible.sort((a,b)=>haversine(a,c)-haversine(b,c));visible=visible.slice(0,cap)}
+ if(visible.length>cap){const c=state.map.getCenter();visible.sort((a,b)=>haversine(a,{lat:c.lat,lon:c.lng})-haversine(b,{lat:c.lat,lon:c.lng}));visible=visible.slice(0,cap)}
  const keep=new Set();
  state.planeById.clear();
  for(const p of visible){
@@ -159,31 +159,48 @@ function renderPlaneMarkers(){
  for(const [id,m] of state.planeMap){if(!keep.has(id)){state.planesLayer.removeLayer(m);state.planeMap.delete(id)}}
 }
 
-function centerDistance(p){let c=state.map?.getCenter();return c?haversine(p,c):0}
+function centerDistance(p){let c=state.map?.getCenter();return c?haversine(p,{lat:c.lat,lon:c.lng}):0}
 async function refreshRadar(force=false){
  if(!state.layers.aircraft||!state.online||!state.map||document.hidden){
   if(!state.layers.aircraft||!state.online){clearPlaneMarkers();if(!state.online){state.planes=[];renderPlaneList()}}
   return;
  }
+ if(state.radarBusy){if(force)state.radarQueued=true;return}
  const now=Date.now(),minInterval=state.lite?60000:23000;
  if(!force&&now-state.lastRadarAt<minInterval)return;
- if(state.radarBusy)return;
  state.radarBusy=true;state.lastRadarAt=now;
- const seq=++state.radarSeq;
+ const seq=++state.radarSeq,centre=state.map.getCenter();
  try{
-  const c=state.map.getCenter(),radius=250;
-  const data=await json(`/api/aircraft?lat=${c.lat.toFixed(4)}&lon=${c.lng.toFixed(4)}&radius=${radius}`,{},16000);
+  const url='/api/aircraft?lat='+centre.lat.toFixed(4)+'&lon='+centre.lng.toFixed(4)+'&radius=250';
+  const data=await json(url,{},16000);
   if(seq!==state.radarSeq||document.hidden)return;
-  const planes=(data.aircraft||data.ac||[]).map(normalizePlane).filter(Boolean).filter(p=>p.seen<90).slice(0,650);
-  state.planes=planes;state.planesSource=data.provider||'ADS-B';
+  const here=state.map.getCenter();
+  if(haversine({lat:centre.lat,lon:centre.lng},{lat:here.lat,lon:here.lng})>80){state.radarQueued=true;return}
+  if(!Array.isArray(data.aircraft)&&!Array.isArray(data.ac))throw Error('Resposta ADS-B inválida.');
+  const raw=data.aircraft||data.ac;
+  const planes=raw.map(normalizePlane).filter(Boolean).filter(p=>p.seen<90).slice(0,650);
+  state.planes=planes;state.planesSource=data.provider||'ADS-B';state.radarFailures=0;
   renderPlaneMarkers();
-  $('mapAircraftCount').textContent=`${fmt(planes.length)} aviões na região`;
-  $('planesUpdated').textContent=`${data.provider||'ADS-B'} · ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · raio 463 km`;
+  const reported=Number(data.total),allCount=Number.isInteger(reported)&&reported>=0?reported:raw.length;
+  $('mapAircraftCount').textContent=fmt(allCount)+' sinais recebidos na região';
+  $('planesUpdated').textContent=state.planesSource+' · '+new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})+' · raio 463 km';
   renderPlaneList();
  }catch(err){
-  if(!document.hidden){state.planes=[];clearPlaneMarkers();renderPlaneList();$('mapAircraftCount').textContent='Radar indisponível';$('planesUpdated').textContent='Falha na fonte ADS-B · tente atualizar'}
+  if(!document.hidden){
+   $('mapAircraftCount').textContent=state.planes.length?'Radar com dados antigos':'Radar indisponível';
+   $('planesUpdated').textContent='Falha na fonte ADS-B · atualização pendente';
+   if(!state.planes.length)renderPlaneList();
+  }
+  state.radarFailures++;
+  state.lastRadarAt=Date.now()+Math.min(120000,30000*state.radarFailures)-minInterval;
   console.warn('Radar:',err.message);
- }finally{state.radarBusy=false}
+ }finally{
+  state.radarBusy=false;
+  if(state.radarQueued&&!document.hidden){
+   state.radarQueued=false;
+   if(state.online&&state.layers.aircraft){state.lastRadarAt=0;refreshRadar(true)}
+  }
+ }
 }
 function renderPlaneList(){let a=[...state.planes];const sort=$('planeSort').value;if(sort==='near')a.sort((x,y)=>centerDistance(x)-centerDistance(y));if(sort==='alt')a.sort((x,y)=>(y.altitude||0)-(x.altitude||0));if(sort==='speed')a.sort((x,y)=>(y.speed||0)-(x.speed||0));if(sort==='callsign')a.sort((x,y)=>(x.flight||x.id).localeCompare(y.flight||y.id));$('planeList').innerHTML=a.length?a.slice(0,25).map(p=>`<button class="plane-card" data-plane="${esc(p.id)}"><div class="pc-top"><strong>${esc(p.flight||p.registration||p.id||'N/A')}</strong><i>✈</i></div><small>${esc(p.model||p.registration||'Aeronave rastreada')}</small><div class="pc-meta"><span>↑ ${p.altitude===null?'—':fmt(p.altitude)+' ft'}</span><span>↗ ${p.speed===null?'—':fmt(p.speed)+' km/h'}</span></div></button>`).join(''):'<div class="empty-message">Nenhum avião disponível nesta área agora. Use o zoom e mova o mapa para outras regiões; dados ao vivo exigem Internet.</div>'}
 $('planeSort').onchange=renderPlaneList;$('planeList').onclick=e=>{const b=e.target.closest('[data-plane]');if(!b)return;const plane=state.planes.find(p=>p.id===b.dataset.plane);if(plane){state.map?.panTo([plane.lat,plane.lon]);openPlane(plane)}};
@@ -260,7 +277,29 @@ $('fullBtn').onclick=()=>{if(!document.fullscreenElement){document.documentEleme
 $('openMenu').onclick=()=>$('sidebar').classList.add('is-open');$('collapseMenu').onclick=()=>$('sidebar').classList.remove('is-open');$('closeDetail').onclick=()=>{$('detailbar').scrollTo({top:0})};
 $('openAbout').onclick=()=>$('aboutDialog').showModal();$('aboutClose').onclick=$('aboutOk').onclick=()=>$('aboutDialog').close();
 function initHash(){const match=location.hash.match(/^#dest=([^&]+)/);if(match){try{const [lat,lon,...title]=decodeURIComponent(match[1]).split(',');if(Number.isFinite(+lat)&&Number.isFinite(+lon))selectDestination({lat:+lat,lon:+lon,name:title.join(',')||'Destino compartilhado',category:'Destino compartilhado'},true)}catch{}}}
-async function checkHealth(){try{const status=await json('/api/health',{},5000);state.apiFares=status.faresConfigured;state.fareTest=status.faresMode==='test';$('faresNote').textContent=location.hostname==='atlasvoos.local'?'* Radar e aeroportos funcionam diretamente pelo aplicativo. Para preços atualizados, use o link de pesquisa externa.':status.faresConfigured?`* Provedor conectado (${status.faresMode==='test'?'TESTE, cotações não reais':'produção'}). Preços podem mudar; assentos dependem da resposta da companhia.`:'* Para mostrar passagens e assentos reais dentro deste app, configure um token de produção Duffel no servidor. A busca externa permanece disponível.'}catch{$('faresNote').textContent='* Sem servidor Atlas Voos ativo, o radar e a cotação integrados não funcionam. Use a versão completa com start.bat / Node.js.'}}
+async function checkHealth(){
+ const native=location.hostname==='atlasvoos.local';
+ try{
+  if(native){
+   const config=await json('/api/config',{},5000);
+   const backend=String(config.faresApiBase||'').trim();
+   state.faresApiBase=/^https:\/\/[a-zA-Z0-9.-]+(?::[0-9]{2,5})?$/.test(backend)?backend:'';
+  }
+  const endpoint=native&&state.faresApiBase?state.faresApiBase+'/api/health':'/api/health';
+  const status=await json(endpoint,{},native&&state.faresApiBase?12000:5000);
+  state.apiFares=!!status.faresConfigured;
+  state.fareTest=status.faresMode==='test';
+  $('faresNote').textContent=state.apiFares
+   ?'* Provedor conectado ('+(state.fareTest?'TESTE: cotações não comerciais':'produção')+'). Valores e disponibilidade podem mudar antes da compra.'
+   :native?'* Radar e aeroportos funcionam no Android. Para cotações dentro do app, configure um backend HTTPS e uma credencial comercial nele. A busca externa está disponível.'
+   :' * Para cotações internas, configure o servidor Atlas Voos com um provedor de tarifas.';
+ }catch(err){
+  state.apiFares=false;
+  $('faresNote').textContent=native
+   ?'* Servidor de tarifas não acessível agora. Radar e aeroportos continuam independentes; use a busca externa de passagens.'
+   :' * Provedor de tarifas indisponível no momento. Use a busca externa.';
+ }
+}
 function updateClocks(){const d=new Date();$('liveClock').textContent=d.toLocaleTimeString('pt-BR');if(state.destination)$('destinationTime').textContent=positionTimeZone(state.destination.timezone,state.destination.lat,state.destination.lon)}
 function init(){renderFavs();renderAirportOptions();$('originAirport').value='GRU';updateOnline();initMap();checkHealth();loadAirports();selectDestination({name:'Lisboa',country:'Portugal',lat:38.7223,lon:-9.1393,timezone:'Europe/Lisbon',category:'Cidade'},false);initHash();updateClocks();setInterval(()=>{if(!document.hidden)updateClocks()},30000);setInterval(()=>{if(!document.hidden&&state.online&&state.layers.aircraft)refreshRadar()},15000);document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.online){updateClocks();refreshRadar(true)}})}
 init();
