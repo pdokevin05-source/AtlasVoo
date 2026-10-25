@@ -6,6 +6,18 @@
 @media (max-width:700px){.app{display:flex;flex-direction:column;height:100dvh}.workspace{height:55dvh;flex:none;min-height:280px}.topbar{height:52px;padding:0 11px}.local-time,.crumb{display:none}.top-actions{gap:8px}.top-btn span{display:none}.top-btn{font-size:18px;padding:3px 10px}.live-chip{font-size:9px}.map-stage{min-height:200px}.top-left{top:16px;left:14px}.top-left h1{font-size:21px}.top-left p{font-size:9px}.map-kicker{font-size:8px}.mini-live{display:none}.top-right{top:12px;right:10px}.map-tool{width:29px;height:29px;font-size:16px}.bottom-left{bottom:25px;left:8px}.bottom-right{bottom:25px;right:6px}.map-legend{padding:7px;gap:6px}.map-legend>span{font-size:8px}.map-legend>span:nth-child(2){display:none}.map-data-status{padding:8px}.map-data-status span{font-size:9px}.map-data-status small{font-size:8px}.map-click-help{font-size:8px}.bottom-panel{display:none}.detailbar{flex:1;min-height:0;border-left:0;border-top:1px solid #42668d}.detail-head{padding:12px 17px}.detail-head h2{font-size:16px;margin-top:4px}.details-scroll{padding:11px 14px 30px}.hero-photo{height:75px}.hero-name-row{padding:12px}.hero-name-row h3{font-size:18px}.mini-stats{margin-top:9px}.mini-stats>div{padding:10px 8px}.modal{max-height:80dvh;overflow:auto}.sidebar-foot{margin-top:20px}.sidebar{overflow:auto}.map-stage:has(.leaflet-popup-open) .top-left{opacity:.2}}
 @media (max-height:650px) and (min-width:701px){.bottom-panel{height:145px}.sidebar{overflow:auto}.brand{padding-bottom:14px}.section-label{margin-top:15px}}
 
-/* Mapa noturno sem chave de API: somente a camada raster é escurecida.
-   Ícones, aviões e legenda Leaflet não recebem o filtro. */
+/* Atlas Voos 1.2: tiles OSM com tema noturno, sem chave de API. */
 .atlas-dark-tiles{filter:invert(1) hue-rotate(180deg) brightness(.7) saturate(.65) contrast(.96)}
+.lite-toggle{white-space:nowrap;border-color:#2d6980}
+.lite-toggle[aria-pressed="true"]{color:#8bf2c5;background:#12392f}
+/* Modo Leve: simplifica pintura e animações, sem ocultar funcionalidades. */
+.lite-mode *, .lite-mode *::before, .lite-mode *::after{animation:none!important;transition:none!important}
+.lite-mode .plane-icon{font-size:18px;text-shadow:none}
+.lite-mode .airport-icon{box-shadow:none}
+.lite-mode .top-left,.lite-mode .modal::backdrop{backdrop-filter:none}
+.lite-mode .map-tool,.lite-mode .plane-card,.lite-mode .map-data-status,.lite-mode .map-legend{box-shadow:none}
+@media(max-width:700px){
+ .top-actions{gap:4px}
+ .lite-toggle{min-width:38px;min-height:38px;font-size:16px;padding:5px 7px;border-radius:12px}
+ .lite-toggle span{display:none!important}
+}

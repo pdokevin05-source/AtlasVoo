@@ -2,6 +2,7 @@ package br.com.atlasvoos;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -31,8 +32,8 @@ public class MainActivity extends Activity {
         web.setBackgroundColor(0xFF07111D);
         web.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
         WebSettings settings = web.getSettings();
-        // Identifica o aplicativo ao provedor de mapas conforme a política OSM.
-        settings.setUserAgentString(settings.getUserAgentString() + " AtlasVoos/1.1.1 (+https://github.com/pdokevin05-source/AtlasVoo)");
+        // Identificação para o provedor de mapas, em vez de um WebView anônimo.
+        settings.setUserAgentString(settings.getUserAgentString() + " AtlasVoos/1.2 (+https://github.com/pdokevin05-source/AtlasVoo)");
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setGeolocationEnabled(true);
@@ -71,7 +72,10 @@ public class MainActivity extends Activity {
             }
         });
         setContentView(web);
-        web.loadUrl(LOCAL_ORIGIN + "/index.html");
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        // Android Go / baixo limite de memória: sinalização sem ponte JavaScript insegura.
+        boolean lowRam = am != null && (am.isLowRamDevice() || am.getMemoryClass() <= 128);
+        web.loadUrl(LOCAL_ORIGIN + "/index.html" + (lowRam ? "?lite=1" : ""));
     }
 
     private boolean locationGranted() {
@@ -91,6 +95,16 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed() {
         if (web != null && web.canGoBack()) web.goBack();
         else super.onBackPressed();
+    }
+
+    @Override protected void onPause() {
+        if (web != null) web.onPause();
+        super.onPause();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (web != null) web.onResume();
     }
 
     @Override protected void onDestroy() {

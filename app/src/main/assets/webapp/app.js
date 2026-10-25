@@ -21,8 +21,16 @@ const BASE_AIRPORTS=[
  ['NRT','RJAA','Tóquio Narita',35.7719,140.3929,'JP'],['HND','RJTT','Tóquio Haneda',35.5494,139.7798,'JP'],['KIX','RJBB','Osaka Kansai',34.4347,135.244,'JP'],['ICN','RKSI','Seul Incheon',37.4602,126.4407,'KR'],['PEK','ZBAA','Pequim Capital',40.0799,116.6031,'CN'],['PVG','ZSPD','Xangai Pudong',31.1443,121.8083,'CN'],['HKG','VHHH','Hong Kong',22.308,113.9185,'HK'],['SIN','WSSS','Singapura Changi',1.3644,103.9915,'SG'],['BKK','VTBS','Bangkok Suvarnabhumi',13.69,100.7501,'TH'],['DEL','VIDP','Nova Delhi Indira Gandhi',28.5562,77.1,'IN'],['BOM','VABB','Mumbai',19.0896,72.8656,'IN'],['SYD','YSSY','Sydney',-33.9399,151.1753,'AU'],['MEL','YMML','Melbourne',-37.669,144.841,'AU'],['AKL','NZAA','Auckland',-37.0082,174.785,'NZ'],['JNB','FAOR','Johannesburgo OR Tambo',-26.1392,28.246,'ZA'],['CPT','FACT','Cidade do Cabo',-33.97,18.6017,'ZA'],['CAI','HECA','Cairo',30.1219,31.4056,'EG'],['CMN','GMMN','Casablanca',33.3675,-7.59,'MA'],['ADD','HAAB','Adis Abeba Bole',8.9779,38.7993,'ET'],['NBO','HKJK','Nairóbi',-1.3192,36.9278,'KE']
 ].map(a=>({iata:a[0],icao:a[1],name:a[2],lat:a[3],lon:a[4],country:a[5],scheduled:true,type:'large_airport'}));
 const KEY='atlasvoos-favorites-v1';
+// Native Android marks low-RAM devices through the local URL; the user can override it.
+const LITE_KEY='atlasvoos-lite-mode-v1';
+const nativeLite=new URLSearchParams(location.search).has('lite');
+const defaultLite=nativeLite || (typeof navigator.deviceMemory==='number' && navigator.deviceMemory<=3) ||
+  (navigator.hardwareConcurrency>0 && navigator.hardwareConcurrency<=4);
+let litePreference=null;try{litePreference=localStorage.getItem(LITE_KEY)}catch{}
+const liteInitial=litePreference==='on'?true:litePreference==='off'?false:defaultLite;
+
 let favs=[];try{favs=JSON.parse(localStorage.getItem(KEY)||'[]');if(!Array.isArray(favs))favs=[]}catch{}
-const state={online:navigator.onLine, destination:null, origin:HOME, gps:null, gpsWatch:null, airports:BASE_AIRPORTS, planes:[], planesSource:'', selectedPlane:null, map:null, markers:null, countryLayer:null, selectedMarker:null, gpsMarker:null, activeRoute:null, planeMap:new Map(), weather:null, searchResults:[], searchMode:'all', apiFares:false, fareTest:false, layers:{aircraft:true,airports:true,borders:true,route:true}, geoSeq:0, weatherSeq:0, airportSeq:0, airportsAttempt:0, radarSeq:0, lastRadarAt:0, radarBusy:false, countryGeojson:null};
+const state={lite:liteInitial, airportMap:new Map(), airportIcon:null, planeById:new Map(), online:navigator.onLine, destination:null, origin:HOME, gps:null, gpsWatch:null, airports:BASE_AIRPORTS, planes:[], planesSource:'', selectedPlane:null, map:null, markers:null, countryLayer:null, selectedMarker:null, gpsMarker:null, activeRoute:null, planeMap:new Map(), weather:null, searchResults:[], searchMode:'all', apiFares:false, fareTest:false, layers:{aircraft:true,airports:true,borders:true,route:true}, geoSeq:0, weatherSeq:0, airportSeq:0, airportsAttempt:0, radarSeq:0, lastRadarAt:0, radarBusy:false, countryGeojson:null};
 let toastTimer;
 function toast(msg){const el=$('toast');el.textContent=msg;el.classList.add('show');clearTimeout(toastTimer);toastTimer=setTimeout(()=>el.classList.remove('show'),3800)}
 const haversine=(a,b)=>{const R=6371,rad=Math.PI/180,dlat=(b.lat-a.lat)*rad,dlon=(b.lon-a.lon)*rad,x=Math.sin(dlat/2)**2+Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(dlon/2)**2;return 2*R*Math.asin(Math.sqrt(x))};
@@ -33,21 +41,55 @@ const distanceText=d=>Number.isFinite(d)?`${fmt(d)} km`:'—';
 async function json(url,options={},ms=17000){if(location.hostname==='atlasvoos.local'&&url==='/api/fares')throw Error('Consultas de preços dentro do app exigem um provedor de passagens configurado; use o parceiro de busca abaixo');const controller=new AbortController();const id=setTimeout(()=>controller.abort(),ms);try{const res=await fetch(url,{...options,signal:controller.signal,cache:'no-store'});let obj;try{obj=await res.json()}catch{throw Error(`Resposta inválida (${res.status})`)}if(!res.ok)throw Error(obj.error||obj.message||`HTTP ${res.status}`);return obj}finally{clearTimeout(id)}}
 function updateOnline(){state.online=navigator.onLine;$('connectionStatus').textContent=state.online?'Conexão disponível':'Sem Internet: dados ao vivo pausados';$('liveLabel').textContent=state.online?'ONLINE':'OFFLINE';document.querySelectorAll('.pulse-dot,.live-chip i').forEach(e=>e.style.background=state.online?'#45d5a6':'#ef9b6b');if(!state.online){state.planes=[];clearPlaneMarkers();renderPlaneList();$('mapAircraftCount').textContent='Radar indisponível'}else{refreshRadar(true);loadAirports()}}
 window.addEventListener('online',updateOnline);window.addEventListener('offline',updateOnline);
+function setLiteMode(enabled,initial=false){
+ state.lite=!!enabled;
+ document.body.classList.toggle('lite-mode',state.lite);
+ const button=$('liteToggle');
+ button?.setAttribute('aria-pressed',String(state.lite));
+ if(button)button.title=state.lite?'Modo Leve ligado. Toque para mostrar mais detalhes.':'Modo Leve desligado. Toque para economizar memória e bateria.';
+ const label=$('liteLabel');if(label)label.textContent=state.lite?'Leve ON':'Leve OFF';
+ if(!initial){try{localStorage.setItem(LITE_KEY,state.lite?'on':'off')}catch{}
+   state.lastRadarAt=0;
+   if(state.map){
+    if(state.lite&&state.countryLayer){state.map.removeLayer(state.countryLayer);state.countryLayer=null;state.countryGeojson=null}
+    if(!state.lite&&!state.countryLayer)loadCountries();
+    renderAirports();renderPlaneMarkers();refreshRadar(true);
+   }
+   toast(state.lite?'Modo Leve ativado: menos marcadores, consumo e animações.':'Modo normal ativado: mais marcadores e detalhes.');
+ }
+}
+$('liteToggle')?.addEventListener('click',()=>setLiteMode(!state.lite));
+setLiteMode(state.lite,true);
 function initMap(){if(!window.L){$('map').innerHTML='<div class="empty-message" style="padding:40px">Não foi possível carregar o mapa. O Atlas Voos precisa de conexão com a Internet.</div>';return}
- const map=L.map('map',{zoomControl:false,minZoom:2,maxZoom:15,worldCopyJump:true,preferCanvas:true}).setView([-23.55,-46.63],4);state.map=map;
- L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,className:'atlas-dark-tiles',attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
+ const map=L.map('map',{zoomControl:false,minZoom:2,maxZoom:15,worldCopyJump:true,preferCanvas:true,fadeAnimation:!state.lite,zoomAnimation:!state.lite,markerZoomAnimation:!state.lite}).setView([-23.55,-46.63],4);state.map=map;
+ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,keepBuffer:state.lite?1:2,updateWhenIdle:true,updateWhenZooming:false,className:'atlas-dark-tiles',attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
  state.markers=L.layerGroup().addTo(map);state.planesLayer=L.layerGroup().addTo(map);state.routesLayer=L.layerGroup().addTo(map);
  map.on('click',ev=>chooseCoordinate(ev.latlng.lat,ev.latlng.lng));
- let moveTimeout;map.on('moveend',()=>{clearTimeout(moveTimeout);moveTimeout=setTimeout(()=>{renderAirports();refreshRadar()},650)});
- $('zoomPlus').onclick=()=>map.zoomIn();$('zoomMinus').onclick=()=>map.zoomOut();$('resetView').onclick=()=>map.setView([15,0],2);$('refreshPlanes').onclick=()=>refreshRadar(true);$('refreshBottom').onclick=()=>refreshRadar(true);$('centerDestination').onclick=()=>state.destination?map.flyTo([state.destination.lat,state.destination.lon],7):toast('Escolha um destino primeiro.');
+ let moveTimeout;map.on('moveend',()=>{clearTimeout(moveTimeout);moveTimeout=setTimeout(()=>{renderAirports();renderPlaneMarkers();refreshRadar()},state.lite?850:650)});
+ $('zoomPlus').onclick=()=>map.zoomIn();$('zoomMinus').onclick=()=>map.zoomOut();$('resetView').onclick=()=>map.setView([15,0],2);$('refreshPlanes').onclick=()=>refreshRadar(true);$('refreshBottom').onclick=()=>refreshRadar(true);$('centerDestination').onclick=()=>state.destination?(state.lite?state.map.setView([state.destination.lat,state.destination.lon],7):state.map.flyTo([state.destination.lat,state.destination.lon],7)):toast('Escolha um destino primeiro.');
  loadCountries();renderAirports();refreshRadar(true);
 }
-async function loadCountries(){if(!state.online||!state.map)return;const url='https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson';
- try{const geo=await json(url,{},22000);state.countryGeojson=geo;state.countryLayer=L.geoJSON(geo,{style:{color:'#55b8d2',weight:.75,opacity:.47,fillOpacity:.01},onEachFeature:(feature,layer)=>{layer.on('mouseover',()=>layer.setStyle({weight:1.7,opacity:.9,fillOpacity:.07}));layer.on('mouseout',()=>state.countryLayer?.resetStyle(layer));layer.on('click',ev=>{L.DomEvent.stopPropagation(ev);const p=feature.properties||{};const name=p.ADMIN||p.NAME||p.NAME_EN||'País';const centre=ev.latlng;state.searchMode==='country'?selectDestination({name,country:name,lat:centre.lat,lon:centre.lng,category:'País'},true):chooseCoordinate(centre.lat,centre.lng)})}});if(state.layers.borders)state.countryLayer.addTo(state.map)}catch(err){console.warn('Fronteiras temporariamente indisponíveis',err.message)}}
+async function loadCountries(){if(state.lite||!state.online||!state.map||state.countryLayer)return;const url='https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson';
+ try{const geo=await json(url,{},22000);if(state.lite||!state.map||document.hidden)return;state.countryGeojson=geo;state.countryLayer=L.geoJSON(geo,{style:{color:'#55b8d2',weight:.75,opacity:.47,fillOpacity:.01},onEachFeature:(feature,layer)=>{layer.on('mouseover',()=>layer.setStyle({weight:1.7,opacity:.9,fillOpacity:.07}));layer.on('mouseout',()=>state.countryLayer?.resetStyle(layer));layer.on('click',ev=>{L.DomEvent.stopPropagation(ev);const p=feature.properties||{};const name=p.ADMIN||p.NAME||p.NAME_EN||'País';const centre=ev.latlng;state.searchMode==='country'?selectDestination({name,country:name,lat:centre.lat,lon:centre.lng,category:'País'},true):chooseCoordinate(centre.lat,centre.lng)})}});if(state.layers.borders)state.countryLayer.addTo(state.map)}catch(err){console.warn('Fronteiras temporariamente indisponíveis',err.message)}}
 function airportNear(pos,limit=5){return state.airports.filter(a=>a.iata&&Number.isFinite(a.lat)).map(a=>({...a,distance:haversine(pos,a)})).sort((a,b)=>a.distance-b.distance).slice(0,limit)}
-function renderAirports(){if(!state.map)return;state.markers.clearLayers();if(!state.layers.airports)return;let airports=state.airports;const bounds=state.map.getBounds().pad(.1);airports=airports.filter(a=>bounds.contains([a.lat,a.lon]));const cap=state.map.getZoom()<5?125:350;
- if(airports.length>cap){const center=state.map.getCenter();airports=airports.sort((a,b)=>haversine(center,a)-haversine(center,b)).slice(0,cap)}
- for(const a of airports){let icon=L.divIcon({className:'',html:'<div class="airport-icon"></div>',iconSize:[12,12],iconAnchor:[6,6]});let m=L.marker([a.lat,a.lon],{icon}).addTo(state.markers);m.bindTooltip(`${esc(a.iata)} · ${esc(a.name)}`,{direction:'top'});m.on('click',ev=>{L.DomEvent.stopPropagation(ev);selectDestination({name:a.name,country:a.country,lat:a.lat,lon:a.lon,category:'Aeroporto'},false);$('destAirport').value=a.iata})}
+function renderAirports(){
+ if(!state.map||!state.markers)return;
+ if(!state.layers.airports){state.markers.clearLayers();state.airportMap.clear();return}
+ const bounds=state.map.getBounds().pad(state.lite?.02:.1);
+ let airports=state.airports.filter(a=>a.iata&&Number.isFinite(a.lat)&&Number.isFinite(a.lon)&&bounds.contains([a.lat,a.lon]));
+ const cap=state.lite?(state.map.getZoom()<5?30:65):(state.map.getZoom()<5?100:200);
+ if(airports.length>cap){const center=state.map.getCenter();airports.sort((a,b)=>haversine(center,a)-haversine(center,b));airports=airports.slice(0,cap)}
+ if(!state.airportIcon)state.airportIcon=L.divIcon({className:'',html:'<div class="airport-icon"></div>',iconSize:[12,12],iconAnchor:[6,6]});
+ const visible=new Set();
+ for(const a of airports){
+  visible.add(a.iata);
+  if(state.airportMap.has(a.iata))continue;
+  const m=L.marker([a.lat,a.lon],{icon:state.airportIcon,keyboard:!state.lite}).addTo(state.markers);
+  m.bindTooltip(`${esc(a.iata)} · ${esc(a.name)}`,{direction:'top'});
+  m.on('click',ev=>{L.DomEvent.stopPropagation(ev);selectDestination({name:a.name,country:a.country,lat:a.lat,lon:a.lon,category:'Aeroporto'},false);$('destAirport').value=a.iata});
+  state.airportMap.set(a.iata,m);
+ }
+ for(const [code,m] of state.airportMap){if(!visible.has(code)){state.markers.removeLayer(m);state.airportMap.delete(code)}}
 }
 function routeArc(start,end,n=80){const rad=Math.PI/180,toXYZ=p=>[Math.cos(p.lat*rad)*Math.cos(p.lon*rad),Math.cos(p.lat*rad)*Math.sin(p.lon*rad),Math.sin(p.lat*rad)],a=toXYZ(start),b=toXYZ(end),dot=clamp(a.reduce((s,x,i)=>s+x*b[i],0),-1,1),omega=Math.acos(dot),out=[];for(let i=0;i<=n;i++){const t=i/n;let k1=1-t,k2=t;if(omega>1e-5){k1=Math.sin((1-t)*omega)/Math.sin(omega);k2=Math.sin(t*omega)/Math.sin(omega)}const v=a.map((x,j)=>x*k1+b[j]*k2);out.push([Math.atan2(v[2],Math.hypot(v[0],v[1]))/rad,Math.atan2(v[1],v[0])/rad])}return out}
 function renderTripRoute(){if(!state.map)return;state.routesLayer.clearLayers();if(!state.layers.route||!state.destination||!state.origin)return;const a=state.origin,b=state.destination;if(haversine(a,b)<15)return;L.polyline(routeArc(a,b),{color:'#4bd1ff',weight:2.6,opacity:.8,dashArray:'8 8',interactive:false}).addTo(state.routesLayer);L.circleMarker([a.lat,a.lon],{color:'#93efff',fillColor:'#268bf0',fillOpacity:.9,radius:6,weight:2}).addTo(state.routesLayer)}
@@ -89,12 +131,60 @@ function weatherText(c){if(c===0)return 'Céu limpo';if([1,2].includes(c))return
 async function loadWeather(p){const seq=++state.weatherSeq;$('weatherCard').innerHTML='<div class="empty-message">Consultando clima atual…</div>';if(!state.online){$('weatherCard').innerHTML='<div class="empty-message">Clima indisponível sem Internet.</div>';return}try{const j=await json(`https://api.open-meteo.com/v1/forecast?latitude=${p.lat}&longitude=${p.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&forecast_days=3&timezone=auto`,{},14000);if(seq!==state.weatherSeq)return;state.weather=j;if(state.destination&&j.timezone)state.destination.timezone=j.timezone;const c=j.current||{},daily=j.daily||{};const code=c.weather_code||0;$('weatherCard').innerHTML=`<div class="weather-big"><div><strong>${Number.isFinite(c.temperature_2m)?Math.round(c.temperature_2m)+'°C':'—'}</strong><small>${esc(weatherText(code))}</small></div><b>${weatherSymbol(code)}</b></div><div class="weather-grid"><span>💧 Umidade: <b>${fmt(c.relative_humidity_2m||0)}%</b></span><span>〰 Vento: <b>${fmt(c.wind_speed_10m||0)} km/h</b></span><span>🌡 Sensação: <b>${fmt(c.apparent_temperature||0)}°C</b></span><span>☂ Chuva amanhã: <b>${daily.precipitation_probability_max?.[1]??'—'}%</b></span></div>`;$('weatherRefreshed').textContent='Atualizado agora';setDestFields(state.destination||p)}catch{$('weatherCard').innerHTML='<div class="empty-message">A previsão não pôde ser carregada agora.</div>';$('weatherRefreshed').textContent='Indisponível'}}
 function normalizePlane(a){let lat=Number(a.lat),lon=Number(a.lon);if(!Number.isFinite(lat)||!Number.isFinite(lon))return null;const altitude=a.alt_baro==null?NaN:Number(a.alt_baro==='ground'?0:a.alt_baro);return {id:String(a.hex||a.icao24||''),flight:String(a.flight||a.callsign||'').trim(),registration:a.r||a.registration||'',model:a.t||a.type||'',lat,lon,altitude:Number.isFinite(altitude)?altitude:null,ground:a.alt_baro==='ground',speed:a.gs!=null&&Number.isFinite(+a.gs)?(+a.gs*1.852):null,track:Number(a.track)||0,seen:Math.max(0,Number(a.seen_pos??a.seen??0)),squawk:a.squawk||'',category:a.category||'',source:'ADS-B'} }
 function planeIcon(p){const deg=p.track||0;const html=`<div class="plane-icon" style="transform:rotate(${deg}deg)">✈</div>`;return L.divIcon({html,className:'',iconSize:[26,26],iconAnchor:[13,13]})}
-function clearPlaneMarkers(){if(state.planesLayer)state.planesLayer.clearLayers();state.planeMap.clear()}
+function clearPlaneMarkers(){if(state.planesLayer)state.planesLayer.clearLayers();state.planeMap.clear();state.planeById.clear()}
+function renderPlaneMarkers(){
+ if(!state.map||!state.planesLayer)return;
+ if(!state.layers.aircraft){clearPlaneMarkers();return}
+ const bounds=state.map.getBounds().pad(state.lite?.05:.15);
+ let visible=state.planes.filter(p=>bounds.contains([p.lat,p.lon]));
+ const cap=state.lite?75:240;
+ if(visible.length>cap){const c=state.map.getCenter();visible.sort((a,b)=>haversine(a,c)-haversine(b,c));visible=visible.slice(0,cap)}
+ const keep=new Set();
+ state.planeById.clear();
+ for(const p of visible){
+   const id=p.id||`${p.flight}:${p.lat.toFixed(3)}:${p.lon.toFixed(3)}`;
+   keep.add(id);state.planeById.set(id,p);
+   let m=state.planeMap.get(id);
+   if(m){m.setLatLng([p.lat,p.lon]);if(m.atlasTrack!==Math.round(p.track/8)){
+     m.setIcon(planeIcon(p));m.atlasTrack=Math.round(p.track/8);
+   }}else{
+     m=L.marker([p.lat,p.lon],{icon:planeIcon(p),keyboard:!state.lite,title:p.flight||id}).addTo(state.planesLayer);
+     m.atlasTrack=Math.round(p.track/8);
+     m.on('click',()=>{const plane=state.planeById.get(id);if(plane)openPlane(plane)});
+     state.planeMap.set(id,m);
+   }
+   const label=`${esc(p.flight||p.registration||id)} · ${p.altitude===null?'Alt. ?':fmt(p.altitude)+' pés'}`;
+   if(m.getTooltip())m.setTooltipContent(label);else m.bindTooltip(label);
+ }
+ for(const [id,m] of state.planeMap){if(!keep.has(id)){state.planesLayer.removeLayer(m);state.planeMap.delete(id)}}
+}
+
 function centerDistance(p){let c=state.map?.getCenter();return c?haversine(p,c):0}
-async function refreshRadar(force=false){if(!state.layers.aircraft||!state.online||!state.map){clearPlaneMarkers();if(!state.online){state.planes=[];renderPlaneList()}return}const now=Date.now();if(!force&&now-state.lastRadarAt<22000)return;if(state.radarBusy)return;state.radarBusy=true;state.lastRadarAt=now;const seq=++state.radarSeq;try{const c=state.map.getCenter(),radius=250; // one 250 NM coverage circle around map center, not global coverage.
- const data=await json(`/api/aircraft?lat=${c.lat.toFixed(4)}&lon=${c.lng.toFixed(4)}&radius=${radius}`,{},16000);
- if(seq!==state.radarSeq)return;const planes=(data.aircraft||data.ac||[]).map(normalizePlane).filter(Boolean).filter(p=>p.seen<90).slice(0,650);state.planes=planes;state.planesSource=data.provider||'ADS-B';clearPlaneMarkers();for(const p of planes){const m=L.marker([p.lat,p.lon],{icon:planeIcon(p),keyboard:true,title:p.flight||p.id}).addTo(state.planesLayer);m.bindTooltip(`${esc(p.flight||p.registration||p.id)} · ${p.altitude===null?'Alt. ?':fmt(p.altitude)+' pés'}`);m.on('click',()=>openPlane(p));state.planeMap.set(p.id,m)}$('mapAircraftCount').textContent=`${fmt(planes.length)} aviões na região`;$('planesUpdated').textContent=`${data.provider||'ADS-B'} · ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · raio 463 km`;renderPlaneList();
- }catch(err){state.planes=[];clearPlaneMarkers();renderPlaneList();$('mapAircraftCount').textContent='Radar indisponível';$('planesUpdated').textContent='Falha na fonte ADS-B · tente atualizar';console.warn('Radar:',err.message)}finally{state.radarBusy=false}}
+async function refreshRadar(force=false){
+ if(!state.layers.aircraft||!state.online||!state.map||document.hidden){
+  if(!state.layers.aircraft||!state.online){clearPlaneMarkers();if(!state.online){state.planes=[];renderPlaneList()}}
+  return;
+ }
+ const now=Date.now(),minInterval=state.lite?60000:23000;
+ if(!force&&now-state.lastRadarAt<minInterval)return;
+ if(state.radarBusy)return;
+ state.radarBusy=true;state.lastRadarAt=now;
+ const seq=++state.radarSeq;
+ try{
+  const c=state.map.getCenter(),radius=250;
+  const data=await json(`/api/aircraft?lat=${c.lat.toFixed(4)}&lon=${c.lng.toFixed(4)}&radius=${radius}`,{},16000);
+  if(seq!==state.radarSeq||document.hidden)return;
+  const planes=(data.aircraft||data.ac||[]).map(normalizePlane).filter(Boolean).filter(p=>p.seen<90).slice(0,650);
+  state.planes=planes;state.planesSource=data.provider||'ADS-B';
+  renderPlaneMarkers();
+  $('mapAircraftCount').textContent=`${fmt(planes.length)} aviões na região`;
+  $('planesUpdated').textContent=`${data.provider||'ADS-B'} · ${new Date().toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} · raio 463 km`;
+  renderPlaneList();
+ }catch(err){
+  if(!document.hidden){state.planes=[];clearPlaneMarkers();renderPlaneList();$('mapAircraftCount').textContent='Radar indisponível';$('planesUpdated').textContent='Falha na fonte ADS-B · tente atualizar'}
+  console.warn('Radar:',err.message);
+ }finally{state.radarBusy=false}
+}
 function renderPlaneList(){let a=[...state.planes];const sort=$('planeSort').value;if(sort==='near')a.sort((x,y)=>centerDistance(x)-centerDistance(y));if(sort==='alt')a.sort((x,y)=>(y.altitude||0)-(x.altitude||0));if(sort==='speed')a.sort((x,y)=>(y.speed||0)-(x.speed||0));if(sort==='callsign')a.sort((x,y)=>(x.flight||x.id).localeCompare(y.flight||y.id));$('planeList').innerHTML=a.length?a.slice(0,25).map(p=>`<button class="plane-card" data-plane="${esc(p.id)}"><div class="pc-top"><strong>${esc(p.flight||p.registration||p.id||'N/A')}</strong><i>✈</i></div><small>${esc(p.model||p.registration||'Aeronave rastreada')}</small><div class="pc-meta"><span>↑ ${p.altitude===null?'—':fmt(p.altitude)+' ft'}</span><span>↗ ${p.speed===null?'—':fmt(p.speed)+' km/h'}</span></div></button>`).join(''):'<div class="empty-message">Nenhum avião disponível nesta área agora. Use o zoom e mova o mapa para outras regiões; dados ao vivo exigem Internet.</div>'}
 $('planeSort').onchange=renderPlaneList;$('planeList').onclick=e=>{const b=e.target.closest('[data-plane]');if(!b)return;const plane=state.planes.find(p=>p.id===b.dataset.plane);if(plane){state.map?.panTo([plane.lat,plane.lon]);openPlane(plane)}};
 let selectedAirRoute=null;
@@ -111,13 +201,14 @@ function applyGPS(pos){
  state.gps={lat:v.latitude,lon:v.longitude,accuracy:v.accuracy,at:Date.now()};
  state.origin={name:'Minha localização (GPS)',lat:v.latitude,lon:v.longitude,country:'',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone};
  if(state.gpsMarker)state.map?.removeLayer(state.gpsMarker);
- if(state.map){state.gpsMarker=L.marker([v.latitude,v.longitude],{icon:L.divIcon({className:'',html:'<div class="gps-pin"></div>',iconSize:[14,14],iconAnchor:[7,7]})}).addTo(state.map);if(first)state.map.flyTo([v.latitude,v.longitude],8)}
+ if(state.map){state.gpsMarker=L.marker([v.latitude,v.longitude],{icon:L.divIcon({className:'',html:'<div class="gps-pin"></div>',iconSize:[14,14],iconAnchor:[7,7]})}).addTo(state.map);if(first)(state.lite?state.map.setView([v.latitude,v.longitude],8):state.map.flyTo([v.latitude,v.longitude],8))}
  const near=airportNear(state.origin,1)[0];if(near)$('originAirport').value=near.iata;
  if(state.destination){setDestFields(state.destination);renderTripRoute()}
  $('geoBtn').disabled=false;$('geoBtn').innerHTML='⌖ <span>GPS ativo · parar</span>';
  if(first)toast(`GPS em acompanhamento contínuo (precisão: ${fmt(v.accuracy)} m). Aeroporto: ${near?.iata||'não identificado'}.`);
 }
 function runGPS(){
+ state.gpsPaused=false;
  if(state.gpsWatch!==null){navigator.geolocation.clearWatch(state.gpsWatch);state.gpsWatch=null;$('geoBtn').innerHTML='⌖ <span>Minha localização</span>';toast('Acompanhamento do GPS interrompido.');return}
  if(!navigator.geolocation){toast('Este dispositivo não oferece GPS ao navegador.');return}
  if(!window.isSecureContext&&location.hostname!=='localhost'){toast('O GPS exige HTTPS ou localhost.');return}
@@ -126,8 +217,17 @@ function runGPS(){
   if(state.gpsWatch!==null){navigator.geolocation.clearWatch(state.gpsWatch);state.gpsWatch=null}
   $('geoBtn').disabled=false;$('geoBtn').innerHTML='⌖ <span>Minha localização</span>';
   toast(err.code===1?'GPS não autorizado. Autorize nas configurações.':'Não foi possível acompanhar o GPS.');
- },{enableHighAccuracy:true,maximumAge:10000,timeout:20000});
+ },{enableHighAccuracy:!state.lite,maximumAge:state.lite?30000:10000,timeout:20000});
 }
+// Suspende GPS em segundo plano; retoma somente se o usuário o havia ligado.
+document.addEventListener('visibilitychange',()=>{
+ if(document.hidden && state.gpsWatch!==null){
+  navigator.geolocation.clearWatch(state.gpsWatch);
+  state.gpsWatch=null;state.gpsPaused=true;
+ }else if(!document.hidden && state.gpsPaused){
+  state.gpsPaused=false;runGPS();
+ }
+});
 $('geoBtn').onclick=runGPS;
 function updateOriginFromForm(){const a=lookupAirport('originAirport');if(a){state.origin={name:a.name,lat:a.lat,lon:a.lon,country:a.country};if(state.destination){setDestFields(state.destination);renderTripRoute()}}return a}
 $('originAirport').onchange=updateOriginFromForm;
@@ -151,10 +251,10 @@ $('sharePlace').onclick=async()=>{if(!state.destination){toast('Selecione um des
 $('openMaps').onclick=()=>{if(!state.destination){toast('Selecione um destino primeiro.');return}const d=state.destination;window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(d.lat+','+d.lon)}`,'_blank','noopener,noreferrer')};
 $('downloadPlan').onclick=()=>{if(!state.destination){toast('Selecione um destino primeiro.');return}const d=state.destination,origin=lookupAirport('originAirport'),dest=lookupAirport('destAirport');const plan={app:'Atlas Voos',exported:new Date().toISOString(),destination:d,origin:state.origin,distanceKm:Math.round(haversine(state.origin,d)),estimatedFlightMinutes:Math.round(haversine(state.origin,d)/820*60+35),airportOrigin:origin?.iata||null,airportDestination:dest?.iata||null,departure:$('departureDate').value,returnDate:$('returnDate').value||null,passengers:Number($('passengerCount').value),cabin:$('cabinClass').value,nearbyAirports:airportNear(d,5).map(a=>({iata:a.iata,name:a.name,km:Math.round(a.distance)})),weather:state.weather?.current||null,notice:'Duração teórica. Nenhuma passagem comprada. Preços e assentos não incluídos sem cotação.'};downloadable(JSON.stringify(plan,null,2),`atlas-viagem-${dateStr(new Date())}.json`,'application/json')};
 $('useDestOrigin').onclick=()=>{if(!state.destination){toast('Selecione um destino primeiro.');return}state.origin={...state.destination};const a=airportNear(state.origin,1)[0];if(a)$('originAirport').value=a.iata;setDestFields(state.destination);renderTripRoute();toast('Origem atualizada.')} ;
-$('airportsMore').onclick=()=>{if(!state.destination){toast('Selecione um destino primeiro.');return}state.map?.flyTo([state.destination.lat,state.destination.lon],9);state.layers.airports=true;$('airportsToggle').checked=true;renderAirports();toast('Aeroportos destacados no mapa.')} ;
+$('airportsMore').onclick=()=>{if(!state.destination){toast('Selecione um destino primeiro.');return}(state.lite?state.map?.setView([state.destination.lat,state.destination.lon],9):state.map?.flyTo([state.destination.lat,state.destination.lon],9));state.layers.airports=true;$('airportsToggle').checked=true;renderAirports();toast('Aeroportos destacados no mapa.')} ;
 $('aircraftToggle').onchange=e=>{state.layers.aircraft=e.target.checked;if(!state.layers.aircraft){state.planesLayer?.clearLayers();state.planes=[];renderPlaneList();$('mapAircraftCount').textContent='Radar oculto'}else refreshRadar(true)};
 $('airportsToggle').onchange=e=>{state.layers.airports=e.target.checked;renderAirports()};
-$('bordersToggle').onchange=e=>{state.layers.borders=e.target.checked;if(state.countryLayer&&state.map){if(state.layers.borders)state.countryLayer.addTo(state.map);else state.map.removeLayer(state.countryLayer)}};
+$('bordersToggle').onchange=e=>{state.layers.borders=e.target.checked;if(state.countryLayer&&state.map){if(state.layers.borders&&!state.lite)state.countryLayer.addTo(state.map);else state.map.removeLayer(state.countryLayer)}};
 $('routeToggle').onchange=e=>{state.layers.route=e.target.checked;renderTripRoute()};
 $('fullBtn').onclick=()=>{if(!document.fullscreenElement){document.documentElement.requestFullscreen?.().catch(()=>toast('Tela cheia não permitida neste navegador.'))}else document.exitFullscreen?.()};
 $('openMenu').onclick=()=>$('sidebar').classList.add('is-open');$('collapseMenu').onclick=()=>$('sidebar').classList.remove('is-open');$('closeDetail').onclick=()=>{$('detailbar').scrollTo({top:0})};
@@ -162,6 +262,6 @@ $('openAbout').onclick=()=>$('aboutDialog').showModal();$('aboutClose').onclick=
 function initHash(){const match=location.hash.match(/^#dest=([^&]+)/);if(match){try{const [lat,lon,...title]=decodeURIComponent(match[1]).split(',');if(Number.isFinite(+lat)&&Number.isFinite(+lon))selectDestination({lat:+lat,lon:+lon,name:title.join(',')||'Destino compartilhado',category:'Destino compartilhado'},true)}catch{}}}
 async function checkHealth(){try{const status=await json('/api/health',{},5000);state.apiFares=status.faresConfigured;state.fareTest=status.faresMode==='test';$('faresNote').textContent=location.hostname==='atlasvoos.local'?'* Radar e aeroportos funcionam diretamente pelo aplicativo. Para preços atualizados, use o link de pesquisa externa.':status.faresConfigured?`* Provedor conectado (${status.faresMode==='test'?'TESTE, cotações não reais':'produção'}). Preços podem mudar; assentos dependem da resposta da companhia.`:'* Para mostrar passagens e assentos reais dentro deste app, configure um token de produção Duffel no servidor. A busca externa permanece disponível.'}catch{$('faresNote').textContent='* Sem servidor Atlas Voos ativo, o radar e a cotação integrados não funcionam. Use a versão completa com start.bat / Node.js.'}}
 function updateClocks(){const d=new Date();$('liveClock').textContent=d.toLocaleTimeString('pt-BR');if(state.destination)$('destinationTime').textContent=positionTimeZone(state.destination.timezone,state.destination.lat,state.destination.lon)}
-function init(){renderFavs();renderAirportOptions();$('originAirport').value='GRU';updateOnline();initMap();checkHealth();loadAirports();selectDestination({name:'Lisboa',country:'Portugal',lat:38.7223,lon:-9.1393,timezone:'Europe/Lisbon',category:'Cidade'},false);initHash();updateClocks();setInterval(updateClocks,15000);setInterval(()=>{if(!document.hidden&&state.online&&state.layers.aircraft)refreshRadar()},30000);document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.online)refreshRadar(true)})}
+function init(){renderFavs();renderAirportOptions();$('originAirport').value='GRU';updateOnline();initMap();checkHealth();loadAirports();selectDestination({name:'Lisboa',country:'Portugal',lat:38.7223,lon:-9.1393,timezone:'Europe/Lisbon',category:'Cidade'},false);initHash();updateClocks();setInterval(()=>{if(!document.hidden)updateClocks()},30000);setInterval(()=>{if(!document.hidden&&state.online&&state.layers.aircraft)refreshRadar()},15000);document.addEventListener('visibilitychange',()=>{if(!document.hidden&&state.online){updateClocks();refreshRadar(true)}})}
 init();
 })();
