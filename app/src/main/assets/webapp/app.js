@@ -35,7 +35,7 @@ function updateOnline(){state.online=navigator.onLine;$('connectionStatus').text
 window.addEventListener('online',updateOnline);window.addEventListener('offline',updateOnline);
 function initMap(){if(!window.L){$('map').innerHTML='<div class="empty-message" style="padding:40px">Não foi possível carregar o mapa. O Atlas Voos precisa de conexão com a Internet.</div>';return}
  const map=L.map('map',{zoomControl:false,minZoom:2,maxZoom:15,worldCopyJump:true,preferCanvas:true}).setView([-23.55,-46.63],4);state.map=map;
- L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'}).addTo(map);
+ L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,className:'atlas-dark-tiles',attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
  state.markers=L.layerGroup().addTo(map);state.planesLayer=L.layerGroup().addTo(map);state.routesLayer=L.layerGroup().addTo(map);
  map.on('click',ev=>chooseCoordinate(ev.latlng.lat,ev.latlng.lng));
  let moveTimeout;map.on('moveend',()=>{clearTimeout(moveTimeout);moveTimeout=setTimeout(()=>{renderAirports();refreshRadar()},650)});

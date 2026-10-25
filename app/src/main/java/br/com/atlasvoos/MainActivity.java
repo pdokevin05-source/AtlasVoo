@@ -31,6 +31,8 @@ public class MainActivity extends Activity {
         web.setBackgroundColor(0xFF07111D);
         web.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
         WebSettings settings = web.getSettings();
+        // Identifica o aplicativo ao provedor de mapas conforme a política OSM.
+        settings.setUserAgentString(settings.getUserAgentString() + " AtlasVoos/1.1.1 (+https://github.com/pdokevin05-source/AtlasVoo)");
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setGeolocationEnabled(true);
