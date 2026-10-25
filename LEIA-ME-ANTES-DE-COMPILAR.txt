@@ -1,0 +1,32 @@
+ATLAS VOOS 1.1 — PROJETO DE APP ANDROID COM INTERFACE EMBUTIDA
+
+O QUE MUDOU
+- A interface HTML, CSS, JavaScript e os ícones agora estão EMBUTIDOS no app.
+- Não há link de servidor falso nem dependência de publicar Node.js na Internet.
+- A API local no Android consulta diretamente as fontes ADS-B públicas e ADSBDB.
+- O catálogo inicial de aeroportos fica no dispositivo; quando há Internet, tenta carregar o catálogo completo OurAirports, guardando-o para a próxima abertura.
+- GPS pede permissão quando o usuário escolhe usá-lo.
+- Links de passagens e mapas externos abrem no navegador do celular.
+
+COMO GERAR UM APK INSTALÁVEL
+Opção 1 — Android Studio:
+1. Extraia esta pasta ZIP.
+2. Abra a pasta AtlasVoos_Android_Studio no Android Studio atualizado.
+3. Configure Android SDK API 35, Gradle 8.9 e JDK 17 (ou deixe o Android Studio instalar esses componentes).
+4. Sincronize o projeto e escolha Build > Build Bundle(s) / APK(s) > Build APK(s).
+5. O APK de debug ficará em app/build/outputs/apk/debug/app-debug.apk.
+
+Opção 2 — GitHub Actions, sem precisar compilar no PC:
+1. Crie um repositório GitHub e envie o CONTEÚDO desta pasta para a raiz (incluindo a pasta .github).
+2. Abra Actions > Gerar APK Android > Run workflow.
+3. Após uma execução bem-sucedida, baixe o artefato AtlasVoos-Android-APK.
+4. Extraia o APK desse artefato e instale no celular, autorizando a instalação externa se necessário.
+
+IMPORTANTE
+- ESTE ZIP CONTÉM O PROJETO ANDROID; NÃO CONTÉM APK JÁ COMPILADO.
+- O ambiente onde este pacote foi gerado não tem Android SDK nem Gradle e não permitiu baixar essas ferramentas.
+- Não foi possível compilar ou testar num dispositivo Android aqui.
+- Mapas, clima, busca de localidades, radar e rotas públicas exigem Internet e dependem dos respectivos serviços externos.
+- Passagens e assentos não são cotados dentro do APK; o app fornece busca externa (Kayak) sem inventar preços.
+- A versão web com Node.js permanece na pasta webapp/, para uso ou personalização futuros.
+- Para distribuição na Play Store, use uma compilação release assinada e revise políticas/termos das fontes de dados.

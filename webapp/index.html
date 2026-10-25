@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0a1427" />
+  <meta name="description" content="Atlas Voos: explore destinos, aeroportos e tráfego aéreo com dados conectados." />
+  <title>Atlas Voos · Explore o mundo ao vivo</title>
+  <link rel="preconnect" href="https://basemaps.cartocdn.com" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" sizes="192x192" type="image/png" href="./icons/icon-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./style.css" />
+  <link rel="stylesheet" href="./mobile.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="mobile-search-head mobile-only"><span>Explorar destinos</span><button type="button" id="mobileSearchClose" aria-label="Fechar busca">×</button></div>
+      <div class="brand"><div class="brand-icon">✈</div><div><strong>ATLAS<span>VOOS</span></strong><small>EXPLORE O PLANETA</small></div></div>
+      <div class="nav-head"><span class="eyebrow">EXPLORAR</span><button id="collapseMenu" class="icon-btn desktop-only" title="Ocultar painel">❮</button></div>
+      <div class="search-container">
+        <label for="placeInput" class="field-label">Qual lugar vamos explorar?</label>
+        <div class="search-field"><span>⌕</span><input id="placeInput" type="search" autocomplete="off" placeholder="País, estado ou cidade…" aria-label="Buscar destino"/><button id="searchGo" title="Buscar">↵</button></div>
+        <div class="suggestions" id="suggestions" role="listbox" hidden></div>
+      </div>
+      <div class="mode-switch" aria-label="Tipo de destino"><button class="mode active" data-mode="all">Tudo</button><button class="mode" data-mode="country">Países</button><button class="mode" data-mode="region">Estados</button><button class="mode" data-mode="city">Cidades</button></div>
+      <div class="section-label">DESTINOS POPULARES</div>
+      <div class="destinations" id="quickDestinations">
+        <button data-city="Lisboa" data-country="Portugal"><span>🇵🇹</span><div><strong>Lisboa</strong><small>Portugal</small></div><b>↗</b></button>
+        <button data-city="Tóquio" data-country="Japão"><span>🇯🇵</span><div><strong>Tóquio</strong><small>Japão</small></div><b>↗</b></button>
+        <button data-city="Nova York" data-country="Estados Unidos"><span>🇺🇸</span><div><strong>Nova York</strong><small>Estados Unidos</small></div><b>↗</b></button>
+        <button data-city="Paris" data-country="França"><span>🇫🇷</span><div><strong>Paris</strong><small>França</small></div><b>↗</b></button>
+        <button data-city="Buenos Aires" data-country="Argentina"><span>🇦🇷</span><div><strong>Buenos Aires</strong><small>Argentina</small></div><b>↗</b></button>
+      </div>
+      <div class="section-label space-head">CAMADAS DO MAPA</div>
+      <div class="toggle-row"><span><i class="toggle-glyph">✈</i> Aviões em tempo real</span><label class="switch"><input id="aircraftToggle" type="checkbox" checked><i></i></label></div>
+      <div class="toggle-row"><span><i class="toggle-glyph">◉</i> Aeroportos</span><label class="switch"><input id="airportsToggle" type="checkbox" checked><i></i></label></div>
+      <div class="toggle-row"><span><i class="toggle-glyph">◇</i> Fronteiras dos países</span><label class="switch"><input id="bordersToggle" type="checkbox" checked><i></i></label></div>
+      <div class="toggle-row"><span><i class="toggle-glyph">⤴</i> Rota da viagem</span><label class="switch"><input id="routeToggle" type="checkbox" checked><i></i></label></div>
+      <div class="section-label space-head">MEUS LUGARES <button id="clearFav" class="text-action" title="Limpar favoritos">limpar</button></div>
+      <div id="favorites" class="favorites-empty">Selecione um lugar e toque em ♡ para salvá-lo.</div>
+      <div class="mobile-install"><strong>Instalar no celular</strong><p>O app pode ficar na tela inicial do Android. Usa Internet para consultas, sem dados fictícios.</p><button id="installApp" type="button">✚ &nbsp; Instalar Atlas Voos</button><small id="installHelp">Disponível quando servido em HTTPS ou localhost.</small></div>
+      <div class="sidebar-foot"><span class="pulse-dot"></span><span id="connectionStatus">Conectando aos serviços…</span><button id="openAbout" title="Sobre dados e fontes">ⓘ</button></div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar"><button id="openMenu" class="icon-btn mobile-only" aria-label="Abrir menu">☰</button><div class="mobile-brand mobile-only"><b>✈</b><strong>ATLAS<span>VOOS</span></strong></div><div class="crumb">VISÃO GLOBAL <span>/</span> <strong id="topLocation">Mundo</strong></div><div class="top-actions"><span class="live-chip"><i></i> <span id="liveLabel">ONLINE</span></span><span class="local-time" id="liveClock">--:--:--</span><button id="geoBtn" class="top-btn" title="Usar GPS do celular">⌖ <span>Minha localização</span></button><button id="fullBtn" class="icon-btn" title="Tela cheia">⛶</button></div></header>
+      <section class="map-stage">
+        <div id="map" role="application" aria-label="Mapa mundial interativo com países, aeroportos e aviões"></div>
+        <div class="map-overlay top-left"><div class="map-kicker">EXPLORAÇÃO GLOBAL <span class="mini-live">● AO VIVO</span></div><h1>O mundo está<br/><em>ao seu alcance.</em></h1><p>Escolha um destino ou acompanhe os céus.</p></div>
+        <div class="map-overlay top-right"><button class="map-tool" id="zoomPlus" title="Aproximar">＋</button><button class="map-tool" id="zoomMinus" title="Afastar">－</button><button class="map-tool" id="resetView" title="Visualização mundial">◎</button><button class="map-tool" id="refreshPlanes" title="Atualizar aviões">↻</button></div>
+        <div class="map-overlay bottom-left"><div class="map-legend"><span><i class="legend-point flight"></i> Aviões rastreados</span><span><i class="legend-point port"></i> Aeroportos</span><span><i class="legend-point place"></i> Destino</span></div></div>
+        <div class="map-overlay bottom-right"><div class="map-data-status"><span id="mapAircraftCount">— aviões nesta área</span><small id="planesUpdated">Aguardando dados</small></div></div>
+        <div class="map-click-help" id="mapHint">Toque em qualquer ponto para selecionar um destino · Toque em um avião para detalhes</div>
+      </section>
+      <section class="bottom-panel"><div class="bottom-panel-head"><div><span class="eyebrow">RADAR AO VIVO</span><h2>Tráfego aéreo próximo</h2></div><div class="bottom-controls"><select id="planeSort" aria-label="Ordenar aviões"><option value="near">Mais próximos do centro</option><option value="alt">Maior altitude</option><option value="speed">Mais rápidos</option><option value="callsign">Identificação A–Z</option></select><button id="refreshBottom" class="subtle-btn">↻ Atualizar</button></div></div><div id="planeList" class="plane-list"><div class="empty-message">Os aviões rastreados aparecerão aqui quando a conexão com o radar estiver disponível.</div></div></section>
+    </main>
+
+    <aside class="detailbar" id="detailbar">
+      <div class="detail-head"><div><span class="eyebrow">PLANEJADOR DE VIAGEM</span><h2>Seu próximo destino <span>✦</span></h2></div><button id="closeDetail" class="icon-btn mobile-only" aria-label="Fechar painel">×</button></div>
+      <div class="details-scroll">
+        <div class="hero-destination"><div class="hero-photo"><span class="photo-text">THE WORLD IS YOURS</span><div class="hero-grid"></div></div><div class="hero-name-row"><div><small id="destinationCategory">DESTINO SELECIONADO</small><h3 id="destinationTitle">Escolha um destino</h3><div id="destinationSubtitle">Clique no mapa ou pesquise um local.</div></div><button id="favBtn" class="favorite-btn" title="Salvar destino">♡</button></div></div>
+        <div class="mini-stats"><div><span>DISTÂNCIA APROX.</span><strong id="destinationDistance">—</strong></div><div><span>TEMPO NO AR*</span><strong id="destinationDuration">—</strong></div><div><span>HORA LOCAL</span><strong id="destinationTime">—</strong></div></div>
+        <p class="estimate-note">* Estimativa de voo direto teórico. Não é duração ou disponibilidade de um voo comercial.</p>
+        <div class="block-title"><h3>Encontre sua passagem</h3><span class="tiny-badge">BUSCA AO VIVO*</span></div>
+        <form id="flightForm" class="flight-form">
+          <div class="route-fields"><label>Origem<input id="originAirport" list="airportOptions" placeholder="GRU ou aeroporto" maxlength="55" required /></label><button type="button" id="swapAirports" title="Trocar origem e destino">⇄</button><label>Destino<input id="destAirport" list="airportOptions" placeholder="LIS ou aeroporto" maxlength="55" required /></label></div>
+          <datalist id="airportOptions"></datalist>
+          <div class="form-grid"><label>Ida<input id="departureDate" type="date" required /></label><label>Volta (opcional)<input id="returnDate" type="date" /></label></div>
+          <div class="form-grid"><label>Passageiros<select id="passengerCount"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select></label><label>Classe<select id="cabinClass"><option value="economy">Econômica</option><option value="premium_economy">Econômica premium</option><option value="business">Executiva</option><option value="first">Primeira classe</option></select></label></div>
+          <div class="form-grid"><label>Escalas<select id="maxStops"><option value="2">Qualquer</option><option value="0">Só direto</option><option value="1">Até 1 escala</option></select></label><label>Ordenar ofertas<select id="fareSort"><option value="price">Menor preço</option><option value="duration">Menor duração</option><option value="departure">Saída mais cedo</option></select></label></div>
+          <button class="primary-btn" type="submit" id="findFlights">⌕ &nbsp; Buscar voos e preços</button>
+        </form>
+        <p class="fine-print" id="faresNote">* Cotações e horários comerciais dependem de um provedor de passagens conectado. Nunca exibimos valores inventados.</p>
+        <div id="flightResults" class="flight-results"><div class="provider-notice">Selecione os aeroportos e a data para consultar ofertas. Se não houver provedor configurado, você poderá abrir uma busca externa.</div></div>
+        <div class="block-title"><h3>Aeroportos mais próximos</h3><button class="text-action" id="airportsMore">ver no mapa</button></div>
+        <div id="airportList" class="airport-list"><div class="empty-message">Selecione um destino para encontrar aeroportos.</div></div>
+        <div class="block-title"><h3>Condições no destino</h3><span id="weatherRefreshed" class="secondary-small">Dados online</span></div>
+        <div id="weatherCard" class="weather-card"><div class="empty-message">Temperatura, vento e previsão aparecem aqui.</div></div>
+        <div class="block-title"><h3>Ferramentas de viagem</h3></div>
+        <div class="action-grid"><button id="copyCoords">⌖ <span>Copiar coordenadas</span></button><button id="sharePlace">↗ <span>Compartilhar destino</span></button><button id="openMaps">▣ <span>Abrir no Maps</span></button><button id="downloadPlan">⇩ <span>Exportar plano</span></button><button id="centerDestination">◎ <span>Centralizar mapa</span></button><button id="useDestOrigin">⇄ <span>Usar como origem</span></button></div>
+        <div class="source-disclaimer">Mapa © OpenStreetMap / CARTO. Geolocalização requer HTTPS ou localhost e sua permissão. Localização de aviões depende de cobertura ADS-B e pode ter atraso. Rotas identificadas não são garantia de destino atual.</div>
+      </div>
+    </aside>
+  </div>
+  <nav id="mobileNav" class="mobile-nav" aria-label="Navegação principal">
+    <button type="button" class="mobile-tab active" data-mobile-tab="mapa" aria-current="page"><span class="tab-icon">◉</span><span>Mapa</span></button>
+    <button type="button" class="mobile-tab" data-mobile-tab="buscar"><span class="tab-icon">⌕</span><span>Buscar</span></button>
+    <button type="button" class="mobile-tab" data-mobile-tab="viagem"><span class="tab-icon">✈</span><span>Viagem</span></button>
+    <button type="button" class="mobile-tab" data-mobile-tab="radar"><span class="tab-icon">⌁</span><span>Radar</span></button>
+  </nav>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="aircraftDialog" class="modal"><div class="modal-head"><span class="eyebrow">IDENTIFICAÇÃO DE AERONAVE</span><button id="planeModalClose" class="icon-btn" aria-label="Fechar">×</button></div><div id="aircraftContent"></div></dialog>
+  <dialog id="aboutDialog" class="modal"><div class="modal-head"><span class="eyebrow">SOBRE O ATLASVOOS</span><button id="aboutClose" class="icon-btn">×</button></div><h2>Dados reais, sem resultados inventados.</h2><p>O mapa utiliza OpenStreetMap/CARTO; lugares e tempo consultam Open-Meteo; aeroportos vêm de OurAirports; o radar usa fontes comunitárias ADS-B e a identificação de rotas usa ADSBDB quando encontrada.</p><p>Assentos livres, preços e horários de voos comerciais só aparecem com autorização de um provedor como Duffel. Modo de teste é exibido como teste. O app não compra bilhetes, rastreia o celular só após autorização e não envia GPS para nenhuma conta própria.</p><p>Uma aeronave pode estar sem rota pública ou sem cobertura. Nesses casos o destino aparece como <strong>não identificado</strong>, nunca como suposição.</p><button class="primary-btn" id="aboutOk">Entendi</button></dialog>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="./app.js" defer></script>
+  <script src="./mobile.js" defer></script>
+</body>
+</html>
