@@ -46,6 +46,7 @@ final class AtlasApi {
     private volatile JSONArray airports;
     private volatile boolean airportsLive = false;
     private volatile long airportsUpdated = 0;
+    private volatile long radarRetryAfter = 0;
 
     private static final class CacheItem {
         final JSONObject value;
@@ -73,6 +74,7 @@ final class AtlasApi {
                 if (!"GET".equals(method)) return error(405, "Método não permitido");
                 switch (path) {
                     case "/api/health": return json(200, health());
+                    case "/api/config": return json(200, new JSONObject().put("faresApiBase", BuildConfig.FARES_API_BASE_URL));
                     case "/api/airports": return json(200, new JSONObject()
                             .put("airports", airports).put("fallback", !airportsLive)
                             .put("updatedAt", airportsLive ? airportsUpdated : JSONObject.NULL));
@@ -107,6 +109,7 @@ final class AtlasApi {
         String key = String.format(Locale.US, "%.2f/%.2f/%.0f", lat, lon, radius);
         CacheItem hit = cache.get("air:" + key);
         if (hit != null && hit.expiry > System.currentTimeMillis()) return hit.value;
+        if (System.currentTimeMillis() < radarRetryAfter) throw new IOException("Radar em espera após falha temporária");
         String params = String.format(Locale.US, "%.4f/%.4f/%.0f", lat, lon, radius);
         String[][] providers = {
                 {"adsb.lol", "https://api.adsb.lol/v2/point/" + params},
@@ -121,10 +124,13 @@ final class AtlasApi {
                 JSONObject result = new JSONObject().put("provider", p[0])
                         .put("updatedAt", isoNow()).put("aircraft", found)
                         .put("total", found.length()).put("radiusNm", radius);
+                if (cache.size() > 240) cache.clear(); // Controle simples de memória em Android Go.
                 cache.put("air:" + key, new CacheItem(result, System.currentTimeMillis() + 16000));
+                radarRetryAfter = 0;
                 return result;
             } catch (Exception ignored) { /* Try next documented public provider. */ }
         }
+        radarRetryAfter = System.currentTimeMillis() + 30000;
         throw new IOException("Fontes ADS-B indisponíveis");
     }
 
@@ -163,7 +169,7 @@ final class AtlasApi {
 
     private WebResourceResponse serveAsset(String path) throws IOException {
         final Set<String> allowed = new HashSet<>();
-        String[] paths = {"index.html", "app.js", "mobile.js", "style.css", "mobile.css",
+        String[] paths = {"index.html", "privacidade.html", "app.js", "mobile.js", "style.css", "mobile.css",
                 "airports-seed.json", "sw.js", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png"};
         java.util.Collections.addAll(allowed, paths);
         String relative = path.substring(1);

@@ -33,7 +33,7 @@ public class MainActivity extends Activity {
         web.setOverScrollMode(WebView.OVER_SCROLL_NEVER);
         WebSettings settings = web.getSettings();
         // Identificação para o provedor de mapas, em vez de um WebView anônimo.
-        settings.setUserAgentString(settings.getUserAgentString() + " AtlasVoos/1.2 (+https://github.com/pdokevin05-source/AtlasVoo)");
+        settings.setUserAgentString(settings.getUserAgentString() + " AtlasVoos/1.3 (+https://github.com/pdokevin05-source/AtlasVoo)");
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
         settings.setGeolocationEnabled(true);
